@@ -1,5 +1,5 @@
 set_project("AnvilUncapped")
-set_version("1.0.0")
+set_version("1.1.0")
 
 add_rules("mode.release")
 add_repositories("xmake-repo https://github.com/xmake-io/xmake-repo.git")
