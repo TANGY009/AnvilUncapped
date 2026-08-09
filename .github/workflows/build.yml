@@ -5,7 +5,24 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Android Release
+          - os: ubuntu-latest
+            platform: android
+            arch: arm64-v8a
+            target_path: build/android/arm64-v8a/release/libAnvilUncapped.so
+            artifact_name: AnvilUncapped-android-arm64
+          
+          # Windows Release
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            target_path: build/windows/x86_64/release/AnvilUncapped.dll
+            artifact_name: AnvilUncapped-release-windows-x64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -13,6 +30,7 @@ jobs:
           submodules: recursive
 
       - name: Setup Android NDK
+        if: matrix.platform == 'android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r29
@@ -24,11 +42,15 @@ jobs:
 
       - name: Configure and Build
         run: |
-          xmake f -p android -a arm64-v8a --ndk=$ANDROID_NDK_HOME -m release -y
+          if [ "${{ matrix.platform }}" == "android" ]; then
+            xmake f -p android -a ${{ matrix.arch }} --ndk=$ANDROID_NDK_HOME -m release -y
+          else
+            xmake f -p windows -a ${{ matrix.arch }} -m release -y
+          fi
           xmake -y
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libAnvilUncapped
-          path: build/android/arm64-v8a/release/libAnvilUncapped.so
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.target_path }}
