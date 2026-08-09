@@ -41,6 +41,7 @@ jobs:
           xmake-version: latest
 
       - name: Configure and Build
+        shell: bash
         run: |
           if [ "${{ matrix.platform }}" == "android" ]; then
             xmake f -p android -a ${{ matrix.arch }} --ndk=$ANDROID_NDK_HOME -m release -y
