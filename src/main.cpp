@@ -63,8 +63,7 @@ void init() {
 #elif defined(_WIN32)
 DWORD WINAPI WorkerThread(LPVOID lpParam) {
     HMODULE hModule = reinterpret_cast<HMODULE>(lpParam);
-
-    Logger::Init();
+;
     HookInfinite();
     LOG("Mod initialized successfully.");
 

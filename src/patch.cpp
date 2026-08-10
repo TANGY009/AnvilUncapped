@@ -4,13 +4,9 @@
 namespace Logger {
     HANDLE hConsole = INVALID_HANDLE_VALUE;
 
-    void Init() {
-        AllocConsole();
-        hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    }
-
     void Log(const char* level, const char* fmt, ...) {
-        if (hConsole == INVALID_HANDLE_VALUE) return;
+        hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hConsole == INVALID_HANDLE_VALUE || hConsole == nullptr) return;
 
         char msg[1024];
         va_list args;
@@ -23,8 +19,8 @@ namespace Logger {
 
         char finalLine[1200];
         int len = snprintf(finalLine, sizeof(finalLine), "%02d:%02d:%02d.%03d %s [%s] %s\n", 
-                            st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, 
-                            level, MOD_NAME, msg);
+                           st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, 
+                           level, MOD_NAME, msg);
 
         DWORD written;
         WriteFile(hConsole, finalLine, static_cast<DWORD>(len), &written, nullptr);

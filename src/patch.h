@@ -31,7 +31,6 @@
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, MOD_NAME, __VA_ARGS__)
 #elif defined(_WIN32)
 namespace Logger {
-    void Init();
     void Log(const char* level, const char* fmt, ...);
 }
 #define LOG(...) Logger::Log("INFO", __VA_ARGS__)
