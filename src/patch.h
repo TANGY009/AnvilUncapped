@@ -14,6 +14,7 @@
 #include <link.h>
 #include <strings.h>
 #include <android/log.h>
+#include <arm_neon.h>
 #elif defined(_WIN32)
 #include <windows.h>
 #include <emmintrin.h>
@@ -56,6 +57,7 @@ namespace Pattern {
     struct Signature {
         Byte bytes[MAX_PATTERN_BYTES];
         size_t size;
+        size_t anchor_offset;
     };
 #elif defined(_WIN32)
     struct Signature {

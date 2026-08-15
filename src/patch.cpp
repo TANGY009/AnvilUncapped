@@ -175,31 +175,59 @@ namespace Pattern {
     Signature Parse(const char* pattern) {
         Signature out{};
         out.size = 0;
-
+        out.anchor_offset = 0;
+        bool found_anchor = false;
+        
         while (*pattern && out.size < MAX_PATTERN_BYTES) {
-            while (*pattern == ' ') pattern++;
+            // Skip leading spaces
+            while (*pattern == ' ' || *pattern == '\t') pattern++;
             if (!*pattern) break;
-
+            
             Byte p{};
+            
             if (pattern[0] == '?' && pattern[1] == '?') {
                 p.mask = 0x00;
                 p.value = 0x00;
                 pattern += 2;
-            } else if (pattern[0] == '?') {
+            } 
+            else if (pattern[0] == '?') {
                 p.mask = 0x0F;
-                p.value = Hex(pattern[1]);
+                int low = Hex(pattern[1]);
+                p.value = (low != -1) ? (uint8_t)low : 0x00;
                 pattern += 2;
-            } else if (pattern[1] == '?' || pattern[1] == ' ' || pattern[1] == '\0') {
+            } 
+            else if (pattern[1] == '?') {
                 p.mask = 0xF0;
-                p.value = Hex(pattern[0]) << 4;
-                pattern += (pattern[1] == '?') ? 2 : 1;
-            } else {
-                p.mask = 0xFF;
-                p.value = (Hex(pattern[0]) << 4) | Hex(pattern[1]);
+                int high = Hex(pattern[0]);
+                p.value = (high != -1) ? (uint8_t)(high << 4) : 0x00;
                 pattern += 2;
+            } 
+            else {
+                int high = Hex(pattern[0]);
+                int low = Hex(pattern[1]);
+                
+                if (high != -1 && low != -1) {
+                    p.mask = 0xFF;
+                    p.value = (uint8_t)((high << 4) | low);
+                    pattern += 2;
+                } else if (high != -1) { 
+                    p.mask = 0xF0;
+                    p.value = (uint8_t)(high << 4);
+                    pattern += 1;
+                } else {
+                    pattern++;
+                    continue;
+                }
             }
+            
+            if (p.mask == 0xFF && !found_anchor) {
+                out.anchor_offset = out.size;
+                found_anchor = true;
+            }
+
             out.bytes[out.size++] = p;
         }
+        
         return out;
     }
 
@@ -217,33 +245,69 @@ namespace Pattern {
             cursor = text;
         }
 
-        uint8_t first_val = sig.bytes[0].value;
-        uint8_t first_mask = sig.bytes[0].mask;
+        const uint8_t* scan_start = (const uint8_t*)text;
+        const size_t anchor = sig.anchor_offset;
+        const uint8_t anchor_val = sig.bytes[anchor].value;
 
-        auto MatchesAt = [&](uintptr_t p) -> bool {
-            if ((*(uint8_t*)p & first_mask) != (first_val & first_mask)) return false;
-
-            for (size_t j = 1; j < sig.size; j++) {
-                uint8_t b = *(uint8_t*)(p + j);
-                if ((b & sig.bytes[j].mask) != (sig.bytes[j].value & sig.bytes[j].mask)) {
+        auto MatchesAt = [&](const uint8_t* p) -> bool {
+            for (size_t j = 0; j < sig.size; j++) {
+                if ((p[j] & sig.bytes[j].mask) != (sig.bytes[j].value & sig.bytes[j].mask)) {
                     return false;
                 }
             }
             return true;
         };
 
-        for (uintptr_t p = cursor; p + sig.size <= end; p += 4) {
-            if (MatchesAt(p)) {
-                cursor = p + sig.size;
-                return p;
-            }
-        }
+        auto ScanRangeNEON = [&](size_t start_offset, size_t end_offset) -> uintptr_t {
+            if (start_offset >= end_offset || end_offset < sig.size) return 0;
 
-        for (uintptr_t p = text; p < cursor && p + sig.size <= end; p += 4) {
-            if (MatchesAt(p)) {
-                cursor = p + sig.size;
-                return p;
+            size_t scan_limit = end_offset - sig.size;
+            size_t i = start_offset;
+
+            i = (i + 3) & ~3;
+
+            uint8x16_t target_vec = vdupq_n_u8(anchor_val);
+
+            for (; i + 16 <= scan_limit; i += 16) {
+                uint8x16_t data = vld1q_u8(&scan_start[i + anchor]);
+                uint8x16_t cmp = vceqq_u8(data, target_vec);
+
+                uint64x2_t mask64 = vreinterpretq_u64_u8(cmp);
+                uint64_t low = vgetq_lane_u64(mask64, 0);
+                uint64_t high = vgetq_lane_u64(mask64, 1);
+
+                if (low || high) {
+                    for (size_t lane = 0; lane < 16; lane += 4) {
+                        size_t candidate = i + lane;
+                        if (candidate <= scan_limit && scan_start[candidate + anchor] == anchor_val) {
+                            if (MatchesAt(&scan_start[candidate])) {
+                                cursor = (uintptr_t)&scan_start[candidate] + sig.size;
+                                return (uintptr_t)&scan_start[candidate];
+                            }
+                        }
+                    }
+                }
             }
+
+            for (; i <= scan_limit; i += 4) {
+                if (scan_start[i + anchor] == anchor_val) {
+                    if (MatchesAt(&scan_start[i])) {
+                        cursor = (uintptr_t)&scan_start[i] + sig.size;
+                        return (uintptr_t)&scan_start[i];
+                    }
+                }
+            }
+
+            return 0;
+        };
+
+        size_t cursor_offset = cursor - text;
+        uintptr_t result = ScanRangeNEON(cursor_offset, size);
+        if (result) return result;
+
+        if (cursor_offset > 0) {
+            result = ScanRangeNEON(0, cursor_offset);
+            if (result) return result;
         }
 
         return 0;
