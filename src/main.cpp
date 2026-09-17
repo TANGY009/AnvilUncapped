@@ -21,11 +21,11 @@ void HookInfinite() {
     
     // AnvilContainerScreenValidator::getCraftResult
     // Lvl 39 clamp
-    Patch::Queue("?? 11 ?? 1A ?? 01 00 37 ?? ?? 00 71", "F7 03 1? 2A");                         // pass on true rename cost, not the clamped one
+    Patch::Queue("?? 11 ?? 1A ?? 01 00 37 ?? ?? 00 71", "F? 03 1? 2A");                                                 // pass on true rename cost, not the clamped one
     // Lvl 40 check
-    Patch::Queue("60 00 00 36 ?? 03 ?? 2A 07 00 00 14 ?? ?? ?? 39", "1F 20 03 D5");             // isTooExpensive check
+    Patch::Queue("60 00 00 36 ?? 03 ?? 2A 07 00 00 14 ?? ?? ?? 39", "1F 20 03 D5");                                     // isTooExpensive check
     // Lvl 39 clamp
-    Patch::Queue("?? ?? 00 54 E8 ?? ?? 39 ?? 11 00 ?? ?? ?? ?? F9 ?? ?? ?? B4", "1F 20 03 D5"); // removes lvl 39 clamp for singular rename
+    Patch::Queue("?? ?? ?? ?? ?? ?? ?? ?? ?? 11 00 ?? E8 ?? 4? ?9 ?? ?? 00 ?? ?? ?? 40 F9 ?8 03 00 B4", "1F 20 03 D5"); // removes lvl 39 clamp for singular rename
 #elif defined(_WIN32)
     bool isServer = Memory::IsServerExecutable();
 
