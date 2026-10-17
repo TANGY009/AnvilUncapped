@@ -18,9 +18,21 @@ namespace Logger {
         GetLocalTime(&st);
 
         char finalLine[1200];
-        int len = snprintf(finalLine, sizeof(finalLine), "%02d:%02d:%02d.%03d %s [%s] %s\n", 
-                           st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, 
-                           level, MOD_NAME, msg);
+        int len = 0;
+        bool isServerMod = Memory::IsServerMod();
+        
+        if (!isServerMod) {
+            len = snprintf(finalLine, sizeof(finalLine),
+                               "[%04d-%02d-%02d %02d:%02d:%02d:%03d %s] [%s] %s\n",
+                               st.wYear, st.wMonth, st.wDay,
+                               st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                               level, MOD_NAME, msg);
+        } else {
+            len = snprintf(finalLine, sizeof(finalLine),
+                               "%02d:%02d:%02d.%03d %s [%s] %s\n",
+                               st.wHour, st.wMinute, st.wSecond, st.wMilliseconds,
+                               level, MOD_NAME, msg);
+        }
 
         DWORD written;
         WriteFile(hConsole, finalLine, static_cast<DWORD>(len), &written, nullptr);
@@ -158,7 +170,17 @@ namespace Memory {
         wchar_t* filename = wcsrchr(path, L'\\');
         filename = (filename != nullptr) ? filename + 1 : path;
 
-        return (_wcsicmp(filename, L"bedrock_server.exe") == 0);
+        return (_wcsicmp(filename, L"bedrock_server.exe") == 0 || _wcsicmp(filename, L"bedrock_server_mod.exe") == 0);
+    }
+    
+    bool IsServerMod() {
+        wchar_t path[MAX_PATH];
+        if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return false;
+        
+        wchar_t* filename = wcsrchr(path, L'\\');
+        filename = (filename != nullptr) ? filename + 1 : path;
+        
+        return (_wcsicmp(filename, L"bedrock_server_mod.exe") == 0);
     }
 }
 #endif
@@ -499,6 +521,7 @@ namespace Patch {
     void Execute() {
         uintptr_t base = GetLibBase("libminecraftpe.so");
         size_t pagesize = sysconf(_SC_PAGESIZE);
+        size_t foundCount = 0;
         
         for (size_t i = 0; i < count; i++) {
             Pattern::Signature search = Pattern::Parse(queue[i].search);
@@ -506,6 +529,7 @@ namespace Patch {
     
             uintptr_t addr = Pattern::Find(search);
             if (!addr) continue;
+            foundCount++;
     
             LOG("Found %s at 0x%lX", queue[i].search, (unsigned long)(addr - base));
     
@@ -535,7 +559,8 @@ namespace Patch {
             
             __builtin___clear_cache((char*)addr, (char*)(addr + max_bytes));
         }
-    
+        
+        LOG("Found %zu/%zu signatures", foundCount, count);
         count = 0;
     }
 #elif defined(_WIN32)
@@ -548,6 +573,7 @@ namespace Patch {
         uintptr_t moduleBase = reinterpret_cast<uintptr_t>(hModule);
         uintptr_t currentCursor = textBase;
         uintptr_t textEnd = textBase + textSize;
+        size_t foundCount = 0;
 
         for (size_t i = 0; i < count; i++) {
             Pattern::Signature searchPattern = Pattern::Parse(queue[i].search);
@@ -565,9 +591,10 @@ namespace Patch {
             }
 
             if (!foundAddr) {
-                LOG("Failed to find pattern: %s", queue[i].search);
+                //LOG("Failed to find pattern: %s", queue[i].search);
                 continue;
             }
+            foundCount++;
 
             uintptr_t rva = foundAddr - moduleBase;
             uintptr_t fileOffset = Memory::RvaToFileOffset(hModule, rva);
@@ -583,12 +610,11 @@ namespace Patch {
 
                 currentCursor = foundAddr + searchPattern.length;
 
-                LOG("Found %s at 0x%llX", queue[i].search, static_cast<unsigned long long>(fileOffset));
-            } else {
-                LOG("Failed VirtualProtect at 0x%llX", static_cast<unsigned long long>(fileOffset));
+                //LOG("Found %s at 0x%llX", queue[i].search, static_cast<unsigned long long>(fileOffset));
             }
         }
-
+        
+        LOG("Found %zu/%zu signatures", foundCount, count);
         count = 0;
     }
 #endif

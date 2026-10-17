@@ -7,7 +7,7 @@ void HookInfinite() {
     // Lvl 39 clamp
     Patch::Queue("6B 00 00 54 E8 04 80 52", "1F 20 03 D5 1F 20 03 D5"); // removes lvl 39 clamp & show true cost for overworked singular rename
     // Lvl 40 check
-    Patch::Queue("CB 00 00 54 08 00 40 F9", "06 00 00 14");             // isTooExpensive check
+    Patch::Queue("CB 00 00 54 08 00 40 F9 08 45 40 F9", "06 00 00 14"); // isTooExpensive check
     
     // AnvilContainerManagerController::getCostText
     Patch::Queue("EB 02 00 54 08 00 40 F9", "17 00 00 14");             // isTooExpensive check
@@ -58,15 +58,12 @@ void HookInfinite() {
 __attribute__((constructor))
 void init() {
     HookInfinite();
-    LOG("Mod initialized successfully.");
 }
 #elif defined(_WIN32)
 DWORD WINAPI WorkerThread(LPVOID lpParam) {
     HMODULE hModule = reinterpret_cast<HMODULE>(lpParam);
 ;
     HookInfinite();
-    LOG("Mod initialized successfully.");
-
     FreeLibraryAndExitThread(hModule, 0);
 }
 
