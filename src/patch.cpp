@@ -336,11 +336,11 @@ namespace Pattern {
     }
 #elif defined(_WIN32)
     namespace Detail {
-        uint8_t HexToNibble(char c) {
+        int HexToNibble(char c) {
             if (c >= '0' && c <= '9') return c - '0';
             if (c >= 'a' && c <= 'f') return c - 'a' + 10;
             if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-            return 0;
+            return -1;
         }
 
         bool IsSpace(char c) {
@@ -364,17 +364,34 @@ namespace Pattern {
             while (sig[i] != '\0' && Detail::IsSpace(sig[i])) i++;
             if (sig[i] == '\0') break;
 
-            if (sig[i] == '?') {
-                pattern.bytes[pattern.length] = 0x00;
-                pattern.mask[pattern.length] = false;
-                i += (sig[i + 1] == '?') ? 2 : 1;
-            } else {
-                uint8_t high = Detail::HexToNibble(sig[i]);
-                uint8_t low = Detail::HexToNibble(sig[i + 1]);
-                pattern.bytes[pattern.length] = static_cast<uint8_t>((high << 4) | low);
-                pattern.mask[pattern.length] = true;
-                i += 2;
+            size_t start = i;
+            while (sig[i] != '\0' && !Detail::IsSpace(sig[i])) i++;
+
+            size_t tokenLength = i - start;
+            if (tokenLength != 2 && !(tokenLength == 1 && sig[start] == '?')) continue;
+
+            char highChar = tokenLength == 1 ? '?' : sig[start];
+            char lowChar = tokenLength == 1 ? '?' : sig[start + 1];
+
+            uint8_t value = 0;
+            uint8_t mask = 0;
+
+            if (highChar != '?') {
+                int high = Detail::HexToNibble(highChar);
+                if (high == -1) continue;
+                value |= static_cast<uint8_t>(high << 4);
+                mask |= 0xF0;
             }
+
+            if (lowChar != '?') {
+                int low = Detail::HexToNibble(lowChar);
+                if (low == -1) continue;
+                value |= static_cast<uint8_t>(low);
+                mask |= 0x0F;
+            }
+
+            pattern.bytes[pattern.length] = value;
+            pattern.mask[pattern.length] = mask;
             pattern.length++;
         }
         pattern.size = pattern.length;
@@ -383,7 +400,7 @@ namespace Pattern {
         int bestRarity2 = 999;
 
         for (size_t idx = 0; idx < pattern.length; ++idx) {
-            if (pattern.mask[idx]) {
+            if (pattern.mask[idx] == 0xFF) {
                 int rarity = Detail::GetByteRarityScore(pattern.bytes[idx]);
                 if (rarity < bestRarity1) {
                     bestRarity2 = bestRarity1;
@@ -407,31 +424,49 @@ namespace Pattern {
     uintptr_t FindSSE2(uintptr_t base, size_t size, const Signature& pattern) {
         if (pattern.length == 0 || size < pattern.length) return 0;
 
-        const size_t maxAnchor = (pattern.anchorOffset1 > pattern.anchorOffset2) ? pattern.anchorOffset1 : pattern.anchorOffset2;
-        if (size < maxAnchor + 16) return 0;
-
         const uint8_t* scanStart = reinterpret_cast<const uint8_t*>(base);
         const size_t scanLimit = size - pattern.length;
+        size_t exactAnchors = 0;
+
+        for (size_t j = 0; j < pattern.length; ++j) {
+            if (pattern.mask[j] == 0xFF) exactAnchors++;
+        }
+
+        auto MatchesAt = [&](size_t candidateIdx) -> bool {
+            for (size_t j = 0; j < pattern.length; ++j) {
+                if ((scanStart[candidateIdx + j] & pattern.mask[j]) != (pattern.bytes[j] & pattern.mask[j])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        if (exactAnchors < 2) {
+            for (size_t i = 0; i <= scanLimit; ++i) {
+                if (MatchesAt(i)) return reinterpret_cast<uintptr_t>(&scanStart[i]);
+            }
+            return 0;
+        }
+
+        const size_t anchor1 = pattern.anchorOffset1;
+        const size_t anchor2 = pattern.anchorOffset2;
+        const size_t maxAnchor = (anchor1 > anchor2) ? anchor1 : anchor2;
+        if (size < maxAnchor + 16) {
+            for (size_t i = 0; i <= scanLimit; ++i) {
+                if (MatchesAt(i)) return reinterpret_cast<uintptr_t>(&scanStart[i]);
+            }
+            return 0;
+        }
 
         const __m128i targetVec1 = _mm_set1_epi8(static_cast<char>(pattern.anchorByte1));
         const __m128i targetVec2 = _mm_set1_epi8(static_cast<char>(pattern.anchorByte2));
-        const size_t anchor1 = pattern.anchorOffset1;
-        const size_t anchor2 = pattern.anchorOffset2;
 
         auto ProcessBitmask = [&](unsigned long bitmask, size_t offset) -> uintptr_t {
             unsigned long bitIndex;
             while (_BitScanForward(&bitIndex, bitmask)) {
                 size_t candidateIdx = offset + bitIndex;
-
-                if (candidateIdx <= scanLimit) {
-                    bool match = true;
-                    for (size_t j = 0; j < pattern.length; ++j) {
-                        if (pattern.mask[j] && scanStart[candidateIdx + j] != pattern.bytes[j]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return reinterpret_cast<uintptr_t>(&scanStart[candidateIdx]);
+                if (candidateIdx <= scanLimit && MatchesAt(candidateIdx)) {
+                    return reinterpret_cast<uintptr_t>(&scanStart[candidateIdx]);
                 }
                 bitmask &= (bitmask - 1);
             }
@@ -439,7 +474,7 @@ namespace Pattern {
         };
 
         size_t i = 0;
-        const size_t simdLimit = (size >= maxAnchor + 16) ? (size - maxAnchor - 16) : 0;
+        const size_t simdLimit = size - maxAnchor - 16;
 
         for (; i + 31 <= simdLimit; i += 32) {
             __m128i mem1_a = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&scanStart[i + anchor1]));
@@ -476,14 +511,7 @@ namespace Pattern {
         }
 
         for (; i <= scanLimit; ++i) {
-            bool match = true;
-            for (size_t j = 0; j < pattern.length; ++j) {
-                if (pattern.mask[j] && scanStart[i + j] != pattern.bytes[j]) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) return reinterpret_cast<uintptr_t>(&scanStart[i]);
+            if (MatchesAt(i)) return reinterpret_cast<uintptr_t>(&scanStart[i]);
         }
 
         return 0;
@@ -602,8 +630,10 @@ namespace Patch {
             DWORD oldProtect;
             if (VirtualProtect(reinterpret_cast<LPVOID>(foundAddr), replacePattern.length, PAGE_EXECUTE_READWRITE, &oldProtect)) {
                 for (size_t j = 0; j < replacePattern.length; ++j) {
-                    if (replacePattern.mask[j]) {
-                        *reinterpret_cast<uint8_t*>(foundAddr + j) = replacePattern.bytes[j];
+                    uint8_t mask = replacePattern.mask[j];
+                    if (mask) {
+                        uint8_t& byte = *reinterpret_cast<uint8_t*>(foundAddr + j);
+                        byte = (byte & ~mask) | (replacePattern.bytes[j] & mask);
                     }
                 }
                 VirtualProtect(reinterpret_cast<LPVOID>(foundAddr), replacePattern.length, oldProtect, &oldProtect);
