@@ -16,6 +16,7 @@
 #include <android/log.h>
 #include <arm_neon.h>
 #elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <emmintrin.h>
 #include <intrin.h>
@@ -25,7 +26,7 @@
 #endif
 
 #define MOD_NAME "AnvilUncapped"
-#define MAX_PATTERN_BYTES 256
+#define MAX_PATTERN_BYTES 512
 #define MAX_QUEUE_ENTRIES 64
 
 #ifdef __ANDROID__
@@ -34,7 +35,7 @@
 namespace Logger {
     void Log(const char* level, const char* fmt, ...);
 }
-#define LOG(...) Logger::Log("INFO", __VA_ARGS__)
+#define LOG(fmt, ...) Logger::Log("INFO", fmt, ##__VA_ARGS__)
 #endif
 
 #ifdef __ANDROID__
@@ -45,6 +46,7 @@ namespace Memory {
     bool GetSectionBounds(HMODULE hModule, const char* sectionName, uintptr_t& outBase, size_t& outSize);
     uintptr_t RvaToFileOffset(HMODULE hModule, uintptr_t rva);
     bool IsServerExecutable();
+    bool IsServerMod();
 }
 #endif
 
@@ -62,7 +64,7 @@ namespace Pattern {
 #elif defined(_WIN32)
     struct Signature {
         uint8_t bytes[MAX_PATTERN_BYTES];
-        bool mask[MAX_PATTERN_BYTES];
+        uint8_t mask[MAX_PATTERN_BYTES];
         size_t length;
         size_t size;
         size_t anchorOffset1;
